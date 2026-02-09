@@ -38,6 +38,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
 		<a href="#" class="nav-link" data-section="pages/paldefender">⚙️ Paldefender</a>
 		<a href="#" class="nav-link" data-section="pages/update">⚙️ Actualizacion</a>
 		<a href="#" class="nav-link" data-section="pages/ftp_manager">🌐 FTP Manager</a>
+		<a href="#" class="nav-link" data-section="pages/donaciones">♥ Donaciones ♥</a>
         <a href="logout.php" class="nav-link text-danger">🚪 Cerrar Sesión</a>
       </div>
     </nav>
