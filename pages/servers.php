@@ -1,199 +1,240 @@
 <?php
-require_once "../config.php";
+require_once __DIR__ . "/../config.php";
 
 if (!is_logged_in()) {
-    echo '<div class="alert alert-danger">Sesión expirada</div>';
-    return;
+    http_response_code(403);
+    exit("Acceso denegado");
 }
 
-error_reporting(0);
+/* ====================================================
+   CONFIG
+==================================================== */
 
-/* ================= CONFIG ================= */
+define("PID_FILE", __DIR__ . "/../server.pid");
+define("TOOLS_DIR", __DIR__ . "/../tools");
 
-$BASE_DIR   = realpath(__DIR__ . "/..");
-$LOG_DIR    = $BASE_DIR . "/logs";
-$LOG_FILE   = $LOG_DIR . "/servers.log";
-$PID_FILE   = $BASE_DIR . "/server.pid.json";
+/* ====================================================
+   CARGAR CONFIG JSON
+==================================================== */
 
-$PYTHON     = defined('PYTHON_EXE') ? PYTHON_EXE : 'python';
-$PY_SCRIPT  = defined('PALWORLD_START_SCRIPT')
-    ? basename(PALWORLD_START_SCRIPT)
-    : 'start_palworld.py';
+$server = [];
 
-if (!is_dir($LOG_DIR)) {
-    mkdir($LOG_DIR, 0777, true);
+if (file_exists(PALWORLD_SERVER_JSON)) {
+    $server = json_decode(
+        file_get_contents(PALWORLD_SERVER_JSON),
+        true
+    ) ?: [];
 }
 
-/* ================= HELPERS ================= */
+/* ====================================================
+   HELPERS
+==================================================== */
 
-function log_event(string $msg): string {
-    global $LOG_FILE;
-    $line = "[" . date("H:i:s") . "] " . $msg . PHP_EOL;
-    file_put_contents($LOG_FILE, $line, FILE_APPEND);
-    return $line;
+function getPID(): int {
+    if (!file_exists(PID_FILE)) return 0;
+    return intval(trim(file_get_contents(PID_FILE)));
 }
 
-function get_pid(): ?int {
-    global $PID_FILE;
-    if (!file_exists($PID_FILE)) return null;
-    $j = json_decode(@file_get_contents($PID_FILE), true);
-    return $j['pid'] ?? null;
-}
-
-function is_running(): bool {
-    $pid = get_pid();
-    if (!$pid) return false;
+function isOnline(): bool {
+    $pid = getPID();
+    if ($pid <= 0) return false;
 
     exec("tasklist /FI \"PID eq $pid\"", $out);
+
     foreach ($out as $line) {
         if (strpos($line, (string)$pid) !== false) {
             return true;
         }
     }
+
     return false;
 }
 
-/* ================= AJAX ================= */
+/* ====================================================
+   START SERVER (🔥 GOD MODE)
+==================================================== */
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+function startServer(): array {
 
-    $action = $_POST['action'];
-    $log = "";
+    global $server;
 
-    /* ---------- INICIAR ---------- */
-    if ($action === 'start') {
-
-        if (is_running()) {
-            echo json_encode([
-                'ok'  => false,
-                'log' => log_event("⚠ El servidor ya está en ejecución")
-            ]);
-            exit;
-        }
-
-        $cmd = sprintf(
-            'cmd /c "cd /d %s && %s %s"',
-            $BASE_DIR,
-            $PYTHON,
-            $PY_SCRIPT
-        );
-
-        log_event("▶ Iniciando servidor...");
-        exec($cmd . " 2>&1", $out, $code);
-
-        foreach ($out as $line) {
-            $log .= log_event($line);
-        }
-
-        if ($code !== 0) {
-            $log .= log_event("❌ Error al iniciar servidor");
-            echo json_encode(['ok' => false, 'log' => $log]);
-            exit;
-        }
-
-        $log .= log_event("✅ Comando de inicio ejecutado");
-        echo json_encode(['ok' => true, 'log' => $log]);
-        exit;
+    if (isOnline()) {
+        return ["ok"=>false,"error"=>"Servidor ya iniciado"];
     }
 
-    /* ---------- DETENER ---------- */
-    if ($action === 'stop') {
+    $python = trim(PYTHON_EXE,'"');
+    $script = TOOLS_DIR . "/iniciar.py";
 
-        $pid = get_pid();
-        if (!$pid) {
-            echo json_encode([
-                'ok'  => false,
-                'log' => log_event("⚠ No hay PID registrado")
-            ]);
-            exit;
-        }
-
-        log_event("⏹ Deteniendo servidor (PID $pid)...");
-        exec("taskkill /F /PID $pid 2>&1", $out);
-
-        foreach ($out as $line) {
-            $log .= log_event($line);
-        }
-
-        @unlink($PID_FILE);
-        $log .= log_event("🛑 Servidor detenido correctamente");
-
-        echo json_encode(['ok' => true, 'log' => $log]);
-        exit;
+    if (!file_exists($script)) {
+        return ["ok"=>false,"error"=>"No existe iniciar.py"];
     }
 
-    echo json_encode([
-        'ok'  => false,
-        'log' => log_event("❌ Acción inválida")
-    ]);
-    exit;
+    // Ejecutar Python TOTALMENTE EN BACKGROUND
+    $cmd =
+        'start "" /B "' .
+        $python .
+        '" "' .
+        $script .
+        '"';
+
+    pclose(popen($cmd, "r"));
+
+    return [
+        "ok"=>true,
+        "msg"=>"Comando enviado → iniciando servidor..."
+    ];
 }
 
-/* ================= UI ================= */
+/* ====================================================
+   STOP SERVER
+==================================================== */
 
-$status = is_running() ? "Activo" : "Detenido";
-$statusClass = $status === "Activo" ? "text-success" : "text-danger";
+function stopServer(): array {
+
+    $pid = getPID();
+
+    if ($pid <= 0) {
+        return ["ok"=>false,"error"=>"No hay PID"];
+    }
+
+    exec("taskkill /F /PID $pid 2>NUL");
+
+    @unlink(PID_FILE);
+
+    return ["ok"=>true,"msg"=>"Servidor detenido"];
+}
+
+/* ====================================================
+   AJAX
+==================================================== */
+
+if ($_SERVER['REQUEST_METHOD']==='POST') {
+
+    $op = $_POST['op'] ?? '';
+
+    if ($op === 'start') {
+        echo json_encode(startServer());
+        exit;
+    }
+
+    if ($op === 'stop') {
+        echo json_encode(stopServer());
+        exit;
+    }
+}
+
+/* ====================================================
+   UI
+==================================================== */
+
+$online = isOnline();
+$pid = getPID();
 ?>
 
-<div class="container-fluid text-light p-4">
-    <h2 class="fw-bold mb-4">🖥️ Servidor Palworld</h2>
+<div class="container mt-4">
 
-    <div class="mb-3">
-        <b>Estado:</b>
-        <span class="<?= $statusClass ?>">
-            <?= $status ?>
-        </span>
-    </div>
+<div class="d-flex align-items-center mb-3">
+    <h2 class="mb-0">🖥️ Servidor Palworld</h2>
 
-    <div class="d-flex gap-3 mb-4">
-        <button
-            class="btn btn-success"
-            onclick="doAction('start')"
-            <?= $status === 'Activo' ? 'disabled' : '' ?>
-        >
-            ▶ Iniciar
-        </button>
+    <button class="btn btn-sm btn-outline-light ms-auto"
+        onclick="reloadServers()">↻ Refrescar</button>
+</div>
 
-        <button
-            class="btn btn-danger"
-            onclick="doAction('stop')"
-            <?= $status === 'Detenido' ? 'disabled' : '' ?>
-        >
-            ⏹ Detener
-        </button>
-    </div>
+<div class="table-responsive">
 
-    <h5>🧾 Registro de eventos</h5>
-    <pre id="log"
-         style="background:#000;color:#0f0;height:240px;
-                overflow-y:auto;padding:10px;border-radius:10px;">
-    </pre>
+<table class="table table-dark table-striped text-center align-middle">
 
-    <small class="text-muted">
-        El log completo se guarda en <code>/logs/servers.log</code>
-    </small>
+<thead>
+<tr>
+<th>Servidor</th>
+<th>Ejecutable</th>
+<th>PID</th>
+<th>Estado</th>
+<th>Parámetros</th>
+<th>Acciones</th>
+</tr>
+</thead>
+
+<tbody>
+
+<?php if(empty($server)): ?>
+
+<tr><td colspan="6">⚠️ Config no encontrada</td></tr>
+
+<?php else: ?>
+
+<tr>
+
+<td><strong><?= htmlspecialchars($server['server_name']) ?></strong></td>
+
+<td><small><?= htmlspecialchars($server['exe']) ?></small></td>
+
+<td>
+<?= $pid > 0 ? $pid : '-' ?>
+</td>
+
+<td>
+<?= $online
+? '<span class="badge bg-success">🟢 ONLINE</span>'
+: '<span class="badge bg-danger">🔴 OFFLINE</span>' ?>
+</td>
+
+<td class="text-start">
+<small><?= htmlspecialchars($server['params']) ?></small>
+</td>
+
+<td>
+
+<button class="btn btn-success btn-sm"
+onclick="serverOp('start')"
+<?= $online ? 'disabled':'' ?>>
+🚀 Iniciar
+</button>
+
+<button class="btn btn-danger btn-sm"
+onclick="serverOp('stop')"
+<?= !$online ? 'disabled':'' ?>>
+🛑 Detener
+</button>
+
+</td>
+
+</tr>
+
+<?php endif; ?>
+
+</tbody>
+</table>
+
+</div>
 </div>
 
 <script>
-function doAction(action) {
-    fetch('pages/servers.php', {
-        method: 'POST',
-        headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: 'action=' + action
-    })
-    .then(r => r.json())
-    .then(j => {
-        if (j.log) {
-            const box = document.getElementById('log');
-            box.textContent += j.log;
-            box.scrollTop = box.scrollHeight;
-        }
-        if (j.ok) {
-            setTimeout(() => location.reload(), 1500);
-        }
-    })
-    .catch(() => {
-        alert("Error de red al comunicarse con el servidor");
+
+function reloadServers(){
+    fetch('pages/servers.php')
+    .then(r=>r.text())
+    .then(html=>{
+        document.getElementById('main').innerHTML = html;
     });
 }
+
+function serverOp(op){
+
+    const data = new URLSearchParams({op});
+
+    fetch('pages/servers.php',{
+        method:'POST',
+        headers:{
+            'Content-Type':'application/x-www-form-urlencoded'
+        },
+        body:data.toString()
+    })
+    .then(r=>r.json())
+    .then(j=>{
+        alert(j.msg || j.error);
+        setTimeout(reloadServers,1500);
+    });
+}
+
 </script>

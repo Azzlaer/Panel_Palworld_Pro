@@ -27,11 +27,12 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     <nav class="col-md-3 col-lg-2 d-md-block sidebar p-3">
       <h3 class="text-light mb-4">⚔️ Panel</h3>
       <div class="nav flex-column nav-pills">
-		<a href="#" class="nav-link" data-section="pages/informacion">🖥️ Informacion</a>
+		<!-- <a href="#" class="nav-link" data-section="pages/informacion">🖥️ Informacion</a> -->
         <a href="#" class="nav-link" data-section="pages/servers">🖥️ Servidores</a>
-		<a href="#" class="nav-link" data-section="pages/procesos">🖥️ Procesos</a>
+		<!-- <a href="#" class="nav-link" data-section="pages/procesos">🖥️ Procesos</a> -->
 		<a href="#" class="nav-link" data-section="pages/users_online">🖥️ Usuarios Online</a>
 		<a href="#" class="nav-link" data-section="pages/configuracion">⚙️ Configuración</a>
+		<a href="#" class="nav-link" data-section="pages/discord_bot">⚙️ Discord Bot</a>
 		<a href="#" class="nav-link" data-section="pages/rcon">⚙️ RCON</a>
 		<a href="#" class="nav-link" data-section="pages/pak_mods">⚙️ PAK Mods</a>
 		<a href="#" class="nav-link" data-section="pages/ue4ss_mods">⚙️ UE4SS Mods</a>
